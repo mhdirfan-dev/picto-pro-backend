@@ -522,23 +522,23 @@ img=img_rgba.convert('RGB')
 draw=ImageDraw.Draw(img)
 
 try:
-    font_big=ImageFont.truetype("arial.ttf",44)
-    font_med=ImageFont.truetype("arial.ttf",20)
-    font_sm=ImageFont.truetype("arial.ttf",15)
+     font_big=ImageFont.truetype("arial.ttf",54)
+     font_med=ImageFont.truetype("arial.ttf",26)
+     font_sm=ImageFont.truetype("arial.ttf",20)
 except:
     font_big=ImageFont.load_default()
-    font_med=font_big
-    font_sm=font_big
+    font_med=ImageFont.load_default()
+    font_sm=ImageFont.load_default()
 
 draw.text((165,69),f'STEP {step} OF {total}',font=font_med,fill=accent,anchor='mm')
 draw.text((W//2,69),badge_l,font=font_med,fill=badge_c,anchor='mm')
 draw.text((W-60,69),subject.upper(),font=font_sm,fill='#ffffff55',anchor='rm')
 
-lines=textwrap.wrap(text,width=46)
-total_h=len(lines)*64
+lines=textwrap.wrap(text,width=38)
+total_h=len(lines)*72
 start_y=(H//2)-(total_h//2)+10
 for idx,line in enumerate(lines):
-    draw.text((W//2,start_y+idx*64),line,font=font_big,fill='white',anchor='mm')
+    draw.text((W//2,start_y+idx*72),line,font=font_big,fill='white',anchor='mm')
 
 bar_x2=60+int(1160*step/total)
 draw.rounded_rectangle([60,666,1220,672],radius=3,fill='#ffffff15')
