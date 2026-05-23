@@ -449,20 +449,27 @@ function fallbackScript(inputText, subject, level, qType) {
 // ════════════════════════════════════════════════════════════
 function generateVoiceovers(steps, jobId) {
   return new Promise(async (resolve) => {
-    const paths = [];
-    for (let i = 0; i < steps.length; i++) {
-      const outPath = path.join(AUDIO_DIR, `${jobId}_step${i}.mp3`);
-      const safeText = steps[i].replace(/"/g,"'").replace(/[^\w\s.,!?'-]/g,"");
+    const paths = steps.map((_, i) =>
+      path.join(AUDIO_DIR, `${jobId}_step${i}.mp3`)
+    );
+
+    // Run all TTS in parallel
+    await Promise.all(steps.map((step, i) => {
+      const outPath = paths[i];
+      const safeText = step.replace(/"/g,"'").replace(/[^\w\s.,!?'-]/g,"");
       const cmd = `edge-tts --text "${safeText}" --voice en-US-JennyNeural --write-media "${outPath}"`;
-      await new Promise((res) => {
+      return new Promise((res) => {
         exec(cmd, (err) => {
           if (err) {
-            exec(`ffmpeg -f lavfi -i anullsrc=r=24000:cl=mono -t 4 "${outPath}" -y`, ()=>res());
+            exec(
+              `ffmpeg -f lavfi -i anullsrc=r=24000:cl=mono -t 3 "${outPath}" -y`,
+              () => res()
+            );
           } else res();
         });
       });
-      paths.push(outPath);
-    }
+    }));
+
     resolve(paths);
   });
 }
@@ -477,9 +484,10 @@ async function generateFrames(steps, subject, jobId, qType="theory") {
   const badgeColor = qType==="math"?"#e96479":qType==="problem"?"#f5a623":"#4ecdc4";
   const badgeLabel = qType==="math"?"MATH":qType==="problem"?"PROBLEM":"THEORY";
 
-  for (let i = 0; i < steps.length; i++) {
+// Build all python scripts first
+  const frameJobs = steps.map((step, i) => {
     const framePath = path.join(FRAMES_DIR, `${jobId}_frame${i}.png`);
-    const safeText  = steps[i].replace(/'/g," ").replace(/\\/g," ").replace(/"/g," ");
+    const safeText  = step.replace(/'/g," ").replace(/\\/g," ").replace(/"/g," ");
     const safeSubj  = subject.replace(/'/g," ");
     const accent    = accents[i%accents.length];
     const bgColor   = bgColors[i%bgColors.length];
@@ -522,23 +530,28 @@ img=img_rgba.convert('RGB')
 draw=ImageDraw.Draw(img)
 
 try:
-     font_big=ImageFont.truetype("arial.ttf",54)
-     font_med=ImageFont.truetype("arial.ttf",26)
-     font_sm=ImageFont.truetype("arial.ttf",20)
+    font_big=ImageFont.truetype("arial.ttf",72)
+    font_med=ImageFont.truetype("arial.ttf",32)
+    font_sm=ImageFont.truetype("arial.ttf",24)
 except:
-    font_big=ImageFont.load_default()
-    font_med=ImageFont.load_default()
-    font_sm=ImageFont.load_default()
+    try:
+        font_big=ImageFont.truetype("DejaVuSans-Bold.ttf",72)
+        font_med=ImageFont.truetype("DejaVuSans.ttf",32)
+        font_sm=ImageFont.truetype("DejaVuSans.ttf",24)
+    except:
+        font_big=ImageFont.load_default()
+        font_med=ImageFont.load_default()
+        font_sm=ImageFont.load_default()
 
 draw.text((165,69),f'STEP {step} OF {total}',font=font_med,fill=accent,anchor='mm')
 draw.text((W//2,69),badge_l,font=font_med,fill=badge_c,anchor='mm')
 draw.text((W-60,69),subject.upper(),font=font_sm,fill='#ffffff55',anchor='rm')
 
-lines=textwrap.wrap(text,width=38)
-total_h=len(lines)*72
+lines=textwrap.wrap(text,width=28)
+total_h=len(lines)*90
 start_y=(H//2)-(total_h//2)+10
 for idx,line in enumerate(lines):
-    draw.text((W//2,start_y+idx*72),line,font=font_big,fill='white',anchor='mm')
+    draw.text((W//2,start_y+idx*90),line,font=font_big,fill='white',anchor='mm')
 
 bar_x2=60+int(1160*step/total)
 draw.rounded_rectangle([60,666,1220,672],radius=3,fill='#ffffff15')
@@ -549,19 +562,29 @@ img.save(out)
 print('frame ok')
 `.trim();
 
-    await new Promise((resolve, reject) => {
+    return { framePath, pyScript, i };
+  });
+
+  // Run all frames in parallel
+  await Promise.all(frameJobs.map(({ framePath, pyScript, i }) =>
+    new Promise((resolve) => {
       const tmpPy = path.join(FRAMES_DIR, `${jobId}_draw${i}.py`);
       fs.writeFileSync(tmpPy, pyScript, "utf8");
-      exec(`python3 "${tmpPy}"`, (err, stdout, stderr) => {
+      exec(`python3 "${tmpPy}"`, (err) => {
         fs.existsSync(tmpPy) && fs.unlinkSync(tmpPy);
         if (err) {
-          exec(`python "${tmpPy.replace("draw"+i,"draw"+i)}" || ffmpeg -y -f lavfi -i color=c=0x1a1a2e:size=1280x720:rate=1 -frames:v 1 "${framePath}"`,
-            (e2) => { resolve(); });
+          exec(
+            `ffmpeg -y -f lavfi -i color=c=0x1a1a2e:size=1280x720:rate=1 -frames:v 1 "${framePath}"`,
+            () => resolve()
+          );
         } else resolve();
       });
-    });
-    paths.push(framePath);
-  }
+    })
+  ));
+
+  steps.forEach((_, i) => {
+    paths.push(path.join(FRAMES_DIR, `${jobId}_frame${i}.png`));
+  });
   return paths;
 }
 
@@ -629,8 +652,10 @@ app.post("/api/generate/text", async (req, res) => {
     console.log(`\n[${jobId}] Text input`);
 
     const { steps, qType } = await generateScript(text, subject, level);
-    const audioPaths = await generateVoiceovers(steps, jobId);
-    const framePaths = await generateFrames(steps, subject, jobId, qType);
+    const [audioPaths, framePaths] = await Promise.all([
+      generateVoiceovers(steps, jobId),
+      generateFrames(steps, subject, jobId, qType),
+    ]);
     const videoPath  = await combineToVideo(framePaths, audioPaths, jobId);
 
     [...framePaths, ...audioPaths].forEach((p) => { try{fs.unlinkSync(p);}catch(_){} });
