@@ -8,6 +8,7 @@ const { exec } = require("child_process");
 const Tesseract = require("tesseract.js");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = 4000;
 
 // ── Crash guard ──────────────────────────────────────────────
@@ -26,7 +27,7 @@ const AUDIO_DIR  = path.join(__dirname, "audio");
 });
 
 // ── Middleware ────────────────────────────────────────────────
-app.use(cors({ origin: "http://localhost:3000" }));
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 app.use("/outputs", express.static(OUTPUT_DIR));
 
@@ -764,7 +765,7 @@ app.post("/api/generate/text", async (req, res) => {
       jobId,
       steps,
       qType,
-      videoUrl: `http://localhost:${PORT}/outputs/${path.basename(videoPath)}`,
+      videoUrl: `${req.protocol}://${req.get("host")}/outputs/${path.basename(videoPath)}`,
     });
   } catch (err) {
     console.error("Text route error:", err.message);
@@ -809,7 +810,7 @@ app.post("/api/generate/image", upload.single("image"), async (req, res) => {
       extractedText,
       steps,
       qType,
-      videoUrl: `http://localhost:${PORT}/outputs/${path.basename(videoPath)}`,
+      videoUrl: `${req.protocol}://${req.get("host")}/outputs/${path.basename(videoPath)}`,
     });
   } catch (err) {
     console.error("Image route error:", err.message);
